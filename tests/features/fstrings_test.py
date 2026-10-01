@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sys
+
 import pytest
 
 from pyupgrade._data import Settings
@@ -79,3 +81,31 @@ def test_fix_fstrings_await_py37():
     s = "async def c(): return '{}'.format(await 1+foo())"
     expected = "async def c(): return f'{await 1+foo()}'"
     assert _fix_plugins(s, settings=Settings(min_version=(3, 7))) == expected
+
+
+@pytest.mark.xfail(sys.version_info < (3, 12), reason='3.12+ feature')
+@pytest.mark.parametrize(
+    ('s', 'expected'),
+    (
+        # PEP 701: quotes may be reused inside f-strings
+        ("'{}'.format(a['b'])", "f'{a['b']}'"),
+        ('"{}".format(a["b"])', 'f"{a["b"]}"'),
+        ("'{}'.format('x')", "f'{'x'}'"),
+        ('"{}".format("x")', 'f"{"x"}"'),
+        ("'{x}'.format(x=a['b'])", "f'{a['b']}'"),
+        ("'{} {}'.format(a['b'], c['d'])", "f'{a['b']} {c['d']}'"),
+    ),
+)
+def test_fix_fstrings_pep701_nested_quotes(s, expected):
+    assert _fix_plugins(s, settings=Settings(min_version=(3, 12))) == expected
+
+
+@pytest.mark.parametrize(
+    's',
+    (
+        # backslashes are still not rewritten
+        r'''"{}".format(a['\\'])''',
+    ),
+)
+def test_fix_fstrings_pep701_noop(s):
+    assert _fix_plugins(s, settings=Settings(min_version=(3, 12))) == s

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import functools
 from collections.abc import Iterable
 
 from tokenize_rt import Offset
@@ -59,7 +60,12 @@ def _to_fstring(
     return unparse_parsed_string(parts)
 
 
-def _fix_fstring(i: int, tokens: list[Token]) -> None:
+def _fix_fstring(
+        i: int,
+        tokens: list[Token],
+        *,
+        allow_nested_quotes: bool = False,
+) -> None:
     token = tokens[i]
 
     paren = i + 3
@@ -72,10 +78,21 @@ def _fix_fstring(i: int, tokens: list[Token]) -> None:
         return
 
     args_src = tokens_to_src(tokens[paren:end])
-    if '\\' in args_src or '"' in args_src or "'" in args_src:
+    if '\\' in args_src:
+        return
+    if not allow_nested_quotes and ('"' in args_src or "'" in args_src):
         return
 
-    tokens[i] = token._replace(src=_to_fstring(token.src, tokens, args))
+    new_src = _to_fstring(token.src, tokens, args)
+    if allow_nested_quotes:
+        # PEP 701 allows reusing the same quote inside an f-string, but
+        # only when the target (and running) interpreter is 3.12+
+        try:
+            ast.parse(new_src)
+        except SyntaxError:
+            return
+
+    tokens[i] = token._replace(src=new_src)
     del tokens[i + 1:end]
 
 
@@ -137,4 +154,10 @@ def visit_Call(
                     state.settings.min_version >= (3, 7) or
                     not contains_await(node)
             ):
-                yield ast_to_offset(node), _fix_fstring
+                func = functools.partial(
+                    _fix_fstring,
+                    allow_nested_quotes=(
+                        state.settings.min_version >= (3, 12)
+                    ),
+                )
+                yield ast_to_offset(node), func

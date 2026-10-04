@@ -79,3 +79,43 @@ def test_fix_fstrings_await_py37():
     s = "async def c(): return '{}'.format(await 1+foo())"
     expected = "async def c(): return f'{await 1+foo()}'"
     assert _fix_plugins(s, settings=Settings(min_version=(3, 7))) == expected
+
+
+@pytest.mark.parametrize(
+    's',
+    (
+        '"{}".format(a["b"])',
+        "'{}'.format(a['b'])",
+        r'''"{}".format(a['\\'])''',
+    ),
+)
+def test_fix_fstrings_pep701_noop_before_py312(s):
+    assert _fix_plugins(s, settings=Settings(min_version=(3, 11))) == s
+
+
+@pytest.mark.parametrize(
+    ('s', 'expected'),
+    (
+        # PEP 701: quotes may nest inside f-string expressions
+        ('"{}".format(a["b"])', 'f"{a["b"]}"'),
+        ("'{}'.format(a['b'])", "f'{a['b']}'"),
+        ("'{}'.format(a[\"b\"])", "f'{a[\"b\"]}'"),
+        ('"{}".format(a[\'b\'])', 'f"{a[\'b\']}"'),
+        (r'''"{}".format(a['\\'])''', r'''f"{a['\\']}"'''),
+        ('"{}".format(f"{x}")', 'f"{f"{x}"}"'),
+        ('"{!r}".format("x")', 'f"{"x"!r}"'),
+    ),
+)
+def test_fix_fstrings_pep701(s, expected):
+    assert _fix_plugins(s, settings=Settings(min_version=(3, 12))) == expected
+
+
+@pytest.mark.parametrize(
+    's',
+    (
+        # would be parsed as a self-documenting f-string expression
+        '"{}".format(lambda x="": x)',
+    ),
+)
+def test_fix_fstrings_pep701_noop(s):
+    assert _fix_plugins(s, settings=Settings(min_version=(3, 12))) == s

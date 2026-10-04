@@ -132,6 +132,15 @@ def test_py36_plus_fstrings(tmpdir):
     assert f.read() == 'f"{hello} {world}"'
 
 
+def test_py312_plus_fstring_nested_quotes(tmpdir):
+    f = tmpdir.join('f.py')
+    f.write('"{x}".format(x=d["k"])\n')
+    assert main((f.strpath, '--py311-plus')) == 0
+    assert f.read() == '"{x}".format(x=d["k"])\n'
+    assert main((f.strpath, '--py312-plus')) == 1
+    assert f.read() == 'f"{d["k"]}"\n'
+
+
 def test_py37_plus_removes_annotations(tmpdir):
     f = tmpdir.join('f.py')
     f.write('from __future__ import generator_stop\nx = 1\n')

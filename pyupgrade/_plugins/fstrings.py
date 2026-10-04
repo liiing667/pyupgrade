@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import functools
 from collections.abc import Iterable
 
 from tokenize_rt import Offset
@@ -8,6 +9,7 @@ from tokenize_rt import parse_string_literal
 from tokenize_rt import Token
 from tokenize_rt import tokens_to_src
 
+from pyupgrade._ast_helpers import ast_parse
 from pyupgrade._ast_helpers import ast_to_offset
 from pyupgrade._ast_helpers import contains_await
 from pyupgrade._ast_helpers import has_starargs
@@ -59,7 +61,12 @@ def _to_fstring(
     return unparse_parsed_string(parts)
 
 
-def _fix_fstring(i: int, tokens: list[Token]) -> None:
+def _fix_fstring(
+        i: int,
+        tokens: list[Token],
+        *,
+        pep701: bool,
+) -> None:
     token = tokens[i]
 
     paren = i + 3
@@ -71,11 +78,22 @@ def _fix_fstring(i: int, tokens: list[Token]) -> None:
     if tokens[end - 1].line != token.line:
         return
 
-    args_src = tokens_to_src(tokens[paren:end])
-    if '\\' in args_src or '"' in args_src or "'" in args_src:
-        return
+    if pep701:
+        # PEP 701 allows nested quotes and backslashes in f-strings, but
+        # make sure the rewritten f-string is still valid (e.g. `=` inside
+        # the braces can be parsed as a self-documenting expression)
+        new_src = _to_fstring(token.src, tokens, args)
+        try:
+            ast_parse(new_src)
+        except SyntaxError:
+            return
+    else:
+        args_src = tokens_to_src(tokens[paren:end])
+        if '\\' in args_src or '"' in args_src or "'" in args_src:
+            return
+        new_src = _to_fstring(token.src, tokens, args)
 
-    tokens[i] = token._replace(src=_to_fstring(token.src, tokens, args))
+    tokens[i] = token._replace(src=new_src)
     del tokens[i + 1:end]
 
 
@@ -137,4 +155,8 @@ def visit_Call(
                     state.settings.min_version >= (3, 7) or
                     not contains_await(node)
             ):
-                yield ast_to_offset(node), _fix_fstring
+                func = functools.partial(
+                    _fix_fstring,
+                    pep701=state.settings.min_version >= (3, 12),
+                )
+                yield ast_to_offset(node), func
